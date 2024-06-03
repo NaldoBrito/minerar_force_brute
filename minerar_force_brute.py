@@ -1,46 +1,55 @@
 import multiprocessing
 from bit import Key
 import os
+import logging
+import random
+from typing import List
 
-def worker(start, end, wallets):
-    for key_int in range(start, end + 1):
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def worker(start: int, end: int, wallets: List[str], stop_event: multiprocessing.Event, file_path: str) -> None:
+    while not stop_event.is_set():
+        key_int = random.randint(start, end)
         key = Key.from_int(key_int)
         public_address = key.address
         if public_address in wallets:
-            print(f"Found matching address: {public_address} with private key: {key.to_hex()}")
+            logging.info(f"Found matching address: {public_address} with private key: {key.to_hex()}")
+            with open(file_path, 'a') as f:
+                f.write(f"Address: {public_address}, Private Key: {key.to_hex()}\n")
+            stop_event.set()
             return
-    print("Completed without finding a match")
+    logging.info("Completed without finding a match")
 
-def main():
-    min_exp = 9  # Expoente mínimo (potência de 2)
-    max_exp = 10  # Exponente máximo (potência de 2)
+def main() -> None:
+    min_exp = 65  # Expoente mínimo (potência de 2)
+    max_exp = 66  # Exponente máximo (potência de 2)
 
-    target_wallets = ['1LeBZP5QCwwgXRtmVUvTVrraqPUokyLHqe']  # Endereços Bitcoin alvo
+    target_wallets = ['13zb1hQbWVsc2S7ZTZnP2G4undNNpdh5so']  # Endereços Bitcoin alvo
 
     min_key = 2 ** min_exp  # Chave privada mínima (em decimal)
     max_key = 2 ** max_exp - 1  # Chave privada máxima (em decimal)
 
-    print(f"Procurando chave privada para o endereço alvo: {target_wallets}")
-    print(f"Intervalo de chaves privadas: [{min_key}, {max_key}]")
+    logging.info(f"Procurando chave privada para o endereço alvo: {target_wallets}")
+    logging.info(f"Intervalo de chaves privadas: [{min_key}, {max_key}]")
 
-    # Cria processos para cada intervalo de chaves privadas
-    processes = []
-    num_processes = os.cpu_count()  # Número de processos baseado no número de CPUs
-    range_per_process = (max_key - min_key) // num_processes
+    num_processes = os.cpu_count() or 1  # Número de processos baseado no número de CPUs
 
-    for i in range(num_processes):
-        start = min_key + i * range_per_process
-        if i == num_processes - 1:  # Se for o último processo, vai até o final do intervalo
-            end = max_key
-        else:
-            end = start + range_per_process - 1
-        p = multiprocessing.Process(target=worker, args=(start, end, target_wallets))
-        processes.append(p)
-        p.start()
+    file_path = 'found_keys.txt'  # Caminho do arquivo onde as chaves encontradas serão salvas
 
-    # Aguarda todos os processos terminarem
-    for p in processes:
-        p.join()
+    with multiprocessing.Manager() as manager:
+        stop_event = manager.Event()
+        pool = multiprocessing.Pool(processes=num_processes)
+        processes = []
+
+        for _ in range(num_processes):
+            p = pool.apply_async(worker, args=(min_key, max_key, target_wallets, stop_event, file_path))
+            processes.append(p)
+
+        for p in processes:
+            p.wait()
+
+        pool.close()
+        pool.join()
 
 if __name__ == "__main__":
     main()
